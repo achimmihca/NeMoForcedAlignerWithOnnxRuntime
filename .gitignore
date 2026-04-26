@@ -64,3 +64,4 @@ packages/
 
 # AI model
 *.onnx
+onnx_model_export/*.txt
