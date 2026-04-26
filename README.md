@@ -24,6 +24,14 @@ The implementation follows these high-level steps:
 
 For a detailed technical guide, please refer to the [ImplementationPlan.md](ImplementationPlan.md).
 
+## Model Metadata
+- **Pretrained Model:** `stt_en_conformer_ctc_small`
+- **Input Shape:** `[batch, 80, time]` (80 Mel-spectrogram bins)
+- **Output Shape:** `[batch, time, 1025]` (1024 BPE tokens + 1 CTC blank)
+- **Downsampling:** 4x (Model output frames are 4x fewer than input frames)
+- **Vocabulary:** 1024 SentencePiece BPE tokens. The CTC blank is at index 1024.
+- **Opset Version:** 17
+
 ## Project Structure
 
 - `NemoForcedAlignerWithOnnxRuntime/`: Core C# project.

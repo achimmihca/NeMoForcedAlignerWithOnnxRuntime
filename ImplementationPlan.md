@@ -7,14 +7,14 @@ This document outlines the steps to implement forced alignment using NeMo's CTC-
 NeMo models (typically `.nemo` files) need to be exported to ONNX format.
 
 ### Steps:
-- **Export from Python:**
+- [x] **Export from Python:**
   Use NeMo's export functionality. A Conformer-CTC model (e.g., `stt_en_conformer_ctc_small`) is recommended.
   ```python
   import nemo.collections.asr as nemo_asr
   model = nemo_asr.models.EncDecCTCModelBPE.from_pretrained(model_name="stt_en_conformer_ctc_small")
   model.export("nfa_model.onnx")
   ```
-- **Extract Vocabulary:**
+- [x] **Extract Vocabulary:**
   Extract the vocabulary/tokens from the model to map model output indices back to characters/subwords.
   ```python
   tokens = model.decoder.vocabulary
@@ -22,8 +22,12 @@ NeMo models (typically `.nemo` files) need to be exported to ONNX format.
       for token in tokens:
           f.write(token + "\n")
   ```
-- **Identify Input/Output Nodes:**
+- [x] **Identify Input/Output Nodes:**
   Use a tool like Netron to verify input names (usually `audio_signal` and `length`) and output names (usually `logprobs`).
+  - **Input:** `audio_signal` shape `[batch, 80, time]` (80 Mel bins).
+  - **Output:** `logprobs` shape `[batch, time, 1025]` (1024 BPE tokens + 1 CTC blank).
+  - **Opset Version:** 17.
+  - **Downsampling:** The output time dimension is 4x smaller than the input (Conformer-CTC stride).
 
 ## 2. Load Audio with NAudio
 
@@ -77,6 +81,9 @@ Align the transcription tokens with the `logprobs` using the Viterbi algorithm.
 
 ### Steps:
 - **Tokenization:** Convert the reference text into token IDs using the extracted `tokens.txt`.
+  - Indices 0-1023: BPE tokens from `tokens.txt`.
+  - Index 1024: CTC Blank token.
+  - Note: Tokens starting with ` ` (Unicode `U+2581`) indicate a space/new word.
 - **Viterbi Decoding:** 
   - Implement the CTC-style Viterbi alignment.
   - Constrain the path to match the sequence of tokens in the reference text.
