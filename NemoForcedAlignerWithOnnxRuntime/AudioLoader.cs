@@ -7,7 +7,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
 {
     public static class AudioLoader
     {
-        public static AudioData LoadAudio(string path)
+        public static NemoForcedAligner.AudioData LoadAudio(string path)
         {
             WaveStream reader;
             if (path.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase))
@@ -32,7 +32,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     for (int i = 0; i < read; i++) samples.Add(buffer[i]);
                 }
 
-                return new AudioData
+                return new NemoForcedAligner.AudioData()
                 {
                     Samples = samples.ToArray(),
                     ChannelCount = waveFormat.Channels,

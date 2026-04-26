@@ -25,13 +25,13 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
             var configs = new[]
             {
-                new NemoForcedAlignerConfiguration("en", 
+                new NemoForcedAligner.Configuration("en", 
                     Path.Combine(projectRoot, "onnx_model_export", "stt_en_conformer_ctc_small.onnx"),
                     Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_conformer_ctc_small.txt")),
-                new NemoForcedAlignerConfiguration("de", 
+                new NemoForcedAligner.Configuration("de", 
                     Path.Combine(projectRoot, "onnx_model_export", "stt_de_conformer_ctc_large.onnx"),
                     Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_de_conformer_ctc_large.txt")),
-                new NemoForcedAlignerConfiguration("es", 
+                new NemoForcedAligner.Configuration("es", 
                     Path.Combine(projectRoot, "onnx_model_export", "stt_es_conformer_ctc_large.onnx"),
                     Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_es_conformer_ctc_large.txt"))
             };
@@ -41,20 +41,14 @@ namespace NemoForcedAlignerWithOnnxRuntime
             
             string audioPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", audioFileName);
             string transcriptPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", transcriptFileName);
+            string transcript = File.ReadAllText(transcriptPath).Trim();
 
             Assert.IsTrue(File.Exists(config.ModelPath), $"Model not found at {config.ModelPath}");
 
-            var aligner = new NemoForcedAligner(config);
+            var aligner = new NemoForcedAligner(config.ModelPath, config.TokensPath);
             
             var audioData = AudioLoader.LoadAudio(audioPath);
-            var features = aligner.ExtractFeatures(audioData);
-            var logprobs = aligner.RunInference(features);
-            
-            string transcript = File.ReadAllText(transcriptPath).Trim();
-            var targetIds = aligner.Tokenize(transcript);
-            
-            var path = aligner.ViterbiAlign(logprobs, targetIds);
-            var alignment = aligner.GetAlignment(path, targetIds);
+            var alignment = aligner.Run(audioData, transcript);
 
             foreach (var wordTimestamp in alignment.Words)
             {

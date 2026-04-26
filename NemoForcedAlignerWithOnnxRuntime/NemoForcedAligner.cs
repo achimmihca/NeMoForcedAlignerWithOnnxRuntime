@@ -13,47 +13,43 @@ using NWaves.Operations;
 
 namespace NemoForcedAlignerWithOnnxRuntime
 {
-    public class NemoForcedAlignerConfiguration
-    {
-        public string Language { get; set; }
-        public string ModelPath { get; set; }
-        public string TokensPath { get; set; }
-
-        public NemoForcedAlignerConfiguration(string language, string modelPath, string tokensPath)
-        {
-            Language = language;
-            ModelPath = modelPath;
-            TokensPath = tokensPath;
-        }
-    }
-
     public class NemoForcedAligner
     {
-        private readonly string[] _tokens;
-        private readonly Dictionary<string, int> _tokenToId;
-        private readonly InferenceSession _session;
-        private readonly int _blankIndex;
         private const int SampleRate = 16000;
         private const int DownsamplingFactor = 4;
 
+        private readonly string[] tokens;
+        private readonly Dictionary<string, int> tokenToId;
+        private readonly InferenceSession session;
+        private readonly int blankIndex;
+
         public NemoForcedAligner(string modelPath, string tokensPath)
         {
-            _session = new InferenceSession(modelPath);
-            _tokens = File.ReadAllLines(tokensPath).Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
-            _tokenToId = new Dictionary<string, int>();
-            for (int i = 0; i < _tokens.Length; i++)
+            session = new InferenceSession(modelPath);
+            tokens = File.ReadAllLines(tokensPath)
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .ToArray();
+            tokenToId = new Dictionary<string, int>();
+            for (int i = 0; i < tokens.Length; i++)
             {
-                _tokenToId[_tokens[i]] = i;
+                tokenToId[tokens[i]] = i;
             }
 
-            _blankIndex = _tokens.Length;
+            blankIndex = tokens.Length;
         }
 
-        public NemoForcedAligner(NemoForcedAlignerConfiguration config) : this(config.ModelPath, config.TokensPath)
+        public ForcedAlignmentResult Run(AudioData audioData, string transcript)
         {
+            var features = ExtractFeatures(audioData);
+            var logprobs = RunInference(features);
+            var targetIds = Tokenize(transcript);
+
+            var path = ViterbiAlign(logprobs, targetIds);
+            var alignment = GetAlignment(path, targetIds);
+            return alignment;
         }
 
-        public List<int> Tokenize(string text)
+        private List<int> Tokenize(string text)
         {
             text = text.ToLowerInvariant().Replace(" ", "▁");
             if (!text.StartsWith("▁")) text = "▁" + text;
@@ -66,7 +62,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 for (int len = Math.Min(text.Length - pos, 20); len > 0; len--)
                 {
                     string sub = text.Substring(pos, len);
-                    if (_tokenToId.TryGetValue(sub, out int id))
+                    if (tokenToId.TryGetValue(sub, out int id))
                     {
                         result.Add(id);
                         pos += len;
@@ -74,13 +70,14 @@ namespace NemoForcedAlignerWithOnnxRuntime
                         break;
                     }
                 }
+
                 if (!found) pos++;
             }
+
             return result;
         }
 
-
-        public AudioFeatures ExtractFeatures(AudioData audioData)
+        private AudioFeatures ExtractFeatures(AudioData audioData)
         {
             float[] samples = audioData.Samples;
             if (audioData.SampleRate != SampleRate || audioData.ChannelCount != 1)
@@ -96,8 +93,10 @@ namespace NemoForcedAlignerWithOnnxRuntime
                         {
                             sum += audioData.Samples[i * audioData.ChannelCount + c];
                         }
+
                         monoSamples[i] = sum / audioData.ChannelCount;
                     }
+
                     samples = monoSamples;
                 }
 
@@ -122,11 +121,11 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 FftSize = 512,
                 FilterBank = FilterBanks.Triangular(512, SampleRate, FilterBanks.MelBands(80, SampleRate, 0, 8000))
             };
-            
+
             var extractor = new FilterbankExtractor(options);
             var signal = new DiscreteSignal(SampleRate, samples);
             var features = extractor.ComputeFrom(signal);
-            
+
             foreach (var frame in features)
             {
                 for (int i = 0; i < frame.Length; i++)
@@ -134,16 +133,15 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     frame[i] = (float)Math.Log(Math.Max(frame[i], 1e-5));
                 }
             }
-            
+
             return new AudioFeatures { Data = features.ToArray() };
         }
 
-
-        public LogProbs RunInference(AudioFeatures features)
+        private LogProbs RunInference(AudioFeatures features)
         {
             int numFrames = features.FrameCount;
             int numBins = features.FeatureCount;
-            
+
             var tensor = new DenseTensor<float>(new[] { 1, numBins, numFrames });
             for (int t = 0; t < numFrames; t++)
             {
@@ -152,22 +150,22 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     tensor[0, b, t] = features.Data[t][b];
                 }
             }
-            
+
             var lengthTensor = new DenseTensor<long>(new[] { 1 });
             lengthTensor[0] = numFrames;
-            
+
             var inputs = new List<NamedOnnxValue>
             {
                 NamedOnnxValue.CreateFromTensor("audio_signal", tensor),
                 NamedOnnxValue.CreateFromTensor("length", lengthTensor)
             };
-            
-            using (var results = _session.Run(inputs))
+
+            using (var results = session.Run(inputs))
             {
                 var logprobsTensor = results.First(r => r.Name == "logprobs").AsTensor<float>();
                 int outFrames = logprobsTensor.Dimensions[1];
                 int vocabSize = logprobsTensor.Dimensions[2];
-                
+
                 var output = new float[outFrames, vocabSize];
                 for (int t = 0; t < outFrames; t++)
                 {
@@ -176,29 +174,31 @@ namespace NemoForcedAlignerWithOnnxRuntime
                         output[t, v] = logprobsTensor[0, t, v];
                     }
                 }
+
                 return new LogProbs { Data = output };
             }
         }
 
-        public int[] ViterbiAlign(LogProbs logProbs, List<int> targetIds)
+        private int[] ViterbiAlign(LogProbs logProbs, List<int> targetIds)
         {
             float[,] logprobs = logProbs.Data;
             int T = logprobs.GetLength(0);
             int[] augmented = new int[2 * targetIds.Count + 1];
             for (int i = 0; i < targetIds.Count; i++)
             {
-                augmented[2 * i] = _blankIndex;
+                augmented[2 * i] = blankIndex;
                 augmented[2 * i + 1] = targetIds[i];
             }
-            augmented[augmented.Length - 1] = _blankIndex;
+
+            augmented[augmented.Length - 1] = blankIndex;
 
             int S = augmented.Length;
             float[,] dp = new float[T, S];
             int[,] backtrack = new int[T, S];
 
             for (int t = 0; t < T; t++)
-                for (int s = 0; s < S; s++)
-                    dp[t, s] = float.NegativeInfinity;
+            for (int s = 0; s < S; s++)
+                dp[t, s] = float.NegativeInfinity;
 
             dp[0, 0] = logprobs[0, augmented[0]];
             dp[0, 1] = logprobs[0, augmented[1]];
@@ -219,7 +219,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     }
 
                     // From s-2 (if current is not blank and s-1 is blank and target[s] != target[s-2])
-                    if (s > 1 && augmented[s] != _blankIndex && augmented[s] != augmented[s - 2])
+                    if (s > 1 && augmented[s] != blankIndex && augmented[s] != augmented[s - 2])
                     {
                         if (dp[t - 1, s - 2] > bestPrevLogProb)
                         {
@@ -247,7 +247,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             return path;
         }
 
-        public ForcedAlignmentResult GetAlignment(int[] path, List<int> targetIds)
+        private ForcedAlignmentResult GetAlignment(int[] path, List<int> targetIds)
         {
             var result = new ForcedAlignmentResult();
             double frameDuration = 0.01 * DownsamplingFactor; // 10ms hop * downsampling
@@ -275,8 +275,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             {
                 var tt = new TokenTimestamp
                 {
-                    Token = _tokens[targetIds[i]],
-                    StartTime = tokenStartFrames[i] * frameDuration
+                    Token = tokens[targetIds[i]], StartTime = tokenStartFrames[i] * frameDuration
                 };
 
                 if (i < targetIds.Count - 1)
@@ -299,9 +298,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 {
                     var wt = new WordTimestamp
                     {
-                        Word = tt.Token.Substring(1),
-                        StartTime = tt.StartTime,
-                        EndTime = tt.EndTime
+                        Word = tt.Token.Substring(1), StartTime = tt.StartTime, EndTime = tt.EndTime
                     };
                     wt.Tokens.Add(tt);
                     wordTimestamps.Add(wt);
@@ -319,28 +316,65 @@ namespace NemoForcedAlignerWithOnnxRuntime
             result.Words = wordTimestamps;
             return result;
         }
-    }
 
-    public class ForcedAlignmentResult
-    {
-        public List<WordTimestamp> Words { get; set; } = new List<WordTimestamp>();
-        public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
-    }
+        public class Configuration
+        {
+            public string Language { get; set; }
+            public string ModelPath { get; set; }
+            public string TokensPath { get; set; }
 
-    public class TokenTimestamp
-    {
-        public string Token { get; set; }
-        public double StartTime { get; set; }
-        public double EndTime { get; set; }
-        public override string ToString() => $"'{Token}': {StartTime:F2} - {EndTime:F2}";
-    }
+            public Configuration(string language, string modelPath, string tokensPath)
+            {
+                Language = language;
+                ModelPath = modelPath;
+                TokensPath = tokensPath;
+            }
+        }
 
-    public class WordTimestamp
-    {
-        public string Word { get; set; }
-        public double StartTime { get; set; }
-        public double EndTime { get; set; }
-        public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
-        public override string ToString() => $"{Word}: {StartTime:F2} - {EndTime:F2} ({Tokens.Count} tokens)";
+        public class ForcedAlignmentResult
+        {
+            public List<WordTimestamp> Words { get; set; } = new List<WordTimestamp>();
+            public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
+        }
+
+        public class TokenTimestamp
+        {
+            public string Token { get; set; }
+            public double StartTime { get; set; }
+            public double EndTime { get; set; }
+            public override string ToString() => $"'{Token}': {StartTime:F2} - {EndTime:F2}";
+        }
+
+        public class WordTimestamp
+        {
+            public string Word { get; set; }
+            public double StartTime { get; set; }
+            public double EndTime { get; set; }
+            public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
+            public override string ToString() => $"{Word}: {StartTime:F2} - {EndTime:F2} ({Tokens.Count} tokens)";
+        }
+
+        public class AudioData
+        {
+            public float[] Samples { get; set; }
+            public int ChannelCount { get; set; }
+            public int SampleRate { get; set; }
+        }
+
+        private class LogProbs
+        {
+            public float[,] Data { get; set; }
+
+            public int FrameCount => Data?.GetLength(0) ?? 0;
+            public int VocabSize => Data?.GetLength(1) ?? 0;
+        }
+
+        private class AudioFeatures
+        {
+            public float[][] Data { get; set; }
+
+            public int FrameCount => Data?.Length ?? 0;
+            public int FeatureCount => (Data != null && Data.Length > 0) ? Data[0].Length : 0;
+        }
     }
 }

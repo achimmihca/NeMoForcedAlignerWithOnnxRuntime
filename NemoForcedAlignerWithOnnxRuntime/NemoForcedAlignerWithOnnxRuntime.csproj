@@ -105,10 +105,7 @@
         </Reference>
     </ItemGroup>
     <ItemGroup>
-        <Compile Include="AudioData.cs" />
-        <Compile Include="AudioFeatures.cs" />
         <Compile Include="AudioLoader.cs" />
-        <Compile Include="LogProbs.cs" />
         <Compile Include="Tests.cs" />
         <Compile Include="NemoForcedAligner.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />
