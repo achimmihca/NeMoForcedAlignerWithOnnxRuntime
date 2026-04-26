@@ -4,14 +4,12 @@ using System.IO;
 using System.Linq;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
-using NAudio.Vorbis;
 using NWaves.FeatureExtractors;
 using NWaves.FeatureExtractors.Options;
 using NWaves.Windows;
 using NWaves.Filters.Fda;
 using NWaves.Signals;
+using NWaves.Operations;
 
 namespace NemoForcedAlignerWithOnnxRuntime
 {
@@ -61,36 +59,37 @@ namespace NemoForcedAlignerWithOnnxRuntime
             return result;
         }
 
-        public float[] LoadAudio(string path)
-        {
-            WaveStream reader;
-            if (path.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase))
-            {
-                reader = new VorbisWaveReader(path);
-            }
-            else
-            {
-                reader = new AudioFileReader(path);
-            }
 
-            using (reader)
+        public AudioFeatures ExtractFeatures(AudioData audioData)
+        {
+            float[] samples = audioData.Samples;
+            if (audioData.SampleRate != SampleRate || audioData.ChannelCount != 1)
             {
-                var resampler = new WdlResamplingSampleProvider(reader.ToSampleProvider(), SampleRate);
-                var mono = resampler.ToMono();
-                
-                var samples = new List<float>();
-                float[] buffer = new float[SampleRate];
-                int read;
-                while ((read = mono.Read(buffer, 0, buffer.Length)) > 0)
+                // Convert to mono if needed
+                if (audioData.ChannelCount > 1)
                 {
-                    for (int i = 0; i < read; i++) samples.Add(buffer[i]);
+                    float[] monoSamples = new float[audioData.Samples.Length / audioData.ChannelCount];
+                    for (int i = 0; i < monoSamples.Length; i++)
+                    {
+                        float sum = 0;
+                        for (int c = 0; c < audioData.ChannelCount; c++)
+                        {
+                            sum += audioData.Samples[i * audioData.ChannelCount + c];
+                        }
+                        monoSamples[i] = sum / audioData.ChannelCount;
+                    }
+                    samples = monoSamples;
                 }
-                return samples.ToArray();
-            }
-        }
 
-        public float[][] ExtractFeatures(float[] samples)
-        {
+                // Resample if needed
+                if (audioData.SampleRate != SampleRate)
+                {
+                    var inputSignal = new DiscreteSignal(audioData.SampleRate, samples);
+                    var resampled = Operation.Resample(inputSignal, SampleRate);
+                    samples = resampled.Samples;
+                }
+            }
+
             var options = new FilterbankOptions
             {
                 SamplingRate = SampleRate,
@@ -116,20 +115,21 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 }
             }
             
-            return features.ToArray();
+            return new AudioFeatures { Data = features.ToArray() };
         }
 
-        public float[,] RunInference(float[][] features)
+
+        public LogProbs RunInference(AudioFeatures features)
         {
-            int numFrames = features.Length;
-            int numBins = 80;
+            int numFrames = features.FrameCount;
+            int numBins = features.FeatureCount;
             
             var tensor = new DenseTensor<float>(new[] { 1, numBins, numFrames });
             for (int t = 0; t < numFrames; t++)
             {
                 for (int b = 0; b < numBins; b++)
                 {
-                    tensor[0, b, t] = features[t][b];
+                    tensor[0, b, t] = features.Data[t][b];
                 }
             }
             
@@ -144,24 +144,25 @@ namespace NemoForcedAlignerWithOnnxRuntime
             
             using (var results = _session.Run(inputs))
             {
-                var logprobs = results.First(r => r.Name == "logprobs").AsTensor<float>();
-                int outFrames = logprobs.Dimensions[1];
-                int vocabSize = logprobs.Dimensions[2];
+                var logprobsTensor = results.First(r => r.Name == "logprobs").AsTensor<float>();
+                int outFrames = logprobsTensor.Dimensions[1];
+                int vocabSize = logprobsTensor.Dimensions[2];
                 
                 var output = new float[outFrames, vocabSize];
                 for (int t = 0; t < outFrames; t++)
                 {
                     for (int v = 0; v < vocabSize; v++)
                     {
-                        output[t, v] = logprobs[0, t, v];
+                        output[t, v] = logprobsTensor[0, t, v];
                     }
                 }
-                return output;
+                return new LogProbs { Data = output };
             }
         }
 
-        public int[] ViterbiAlign(float[,] logprobs, List<int> targetIds)
+        public int[] ViterbiAlign(LogProbs logProbs, List<int> targetIds)
         {
+            float[,] logprobs = logProbs.Data;
             int T = logprobs.GetLength(0);
             int[] augmented = new int[2 * targetIds.Count + 1];
             for (int i = 0; i < targetIds.Count; i++)

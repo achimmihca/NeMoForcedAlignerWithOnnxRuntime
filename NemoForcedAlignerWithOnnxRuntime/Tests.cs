@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
-using NAudio;
 
 namespace NemoForcedAlignerWithOnnxRuntime
 {
@@ -33,8 +32,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
             var aligner = new NemoForcedAligner(modelPath, tokensPath);
             
-            var samples = aligner.LoadAudio(audioPath);
-            var features = aligner.ExtractFeatures(samples);
+            var audioData = AudioLoader.LoadAudio(audioPath);
+            var features = aligner.ExtractFeatures(audioData);
             var logprobs = aligner.RunInference(features);
             
             string transcript = File.ReadAllText(transcriptPath).Trim();
@@ -61,7 +60,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 lastEnd = wt.EndTime;
             }
             
-            double audioDuration = samples.Length / 16000.0;
+            double audioDuration = audioData.Samples.Length / (double)audioData.SampleRate;
             Assert.LessOrEqual(wordTimestamps.Last().EndTime, audioDuration + 0.1, "End time should be within audio duration");
         }
     }
