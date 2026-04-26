@@ -2,17 +2,18 @@ using System;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
-using Microsoft.ML.OnnxRuntime;
 using NAudio;
-using NWaves;
 
 namespace NemoForcedAlignerWithOnnxRuntime
 {
     [TestFixture]
     public class Tests
     {
-        [Test]
-        public void TestForcedAlignment()
+        [TestCase("Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.txt", 9)]
+        [TestCase("Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.ogg", "Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.txt", 15)]
+        [TestCase("Excerpt-Kurzgesagt-DasImmunsystemErklärt.ogg", "Excerpt-Kurzgesagt-DasImmunsystemErklärt.txt", 14)]
+        [TestCase("Excerpt-Kurzgesagt-HowTheImmuneSystemActuallyWorks.ogg", "Excerpt-Kurzgesagt-HowTheImmuneSystemActuallyWorks.txt", 16)]
+        public void TestForcedAlignment(string audioFileName, string transcriptFileName, int expectedWordCount)
         {
             // Find project root
             string currentDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -25,8 +26,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
             
             string modelPath = Path.Combine(projectRoot, "AiModels", "stt_en_conformer_ctc_small.onnx");
             string tokensPath = Path.Combine(projectRoot, "AiModels", "tokens.txt");
-            string audioPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav");
-            string transcriptPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.txt");
+            string audioPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", audioFileName);
+            string transcriptPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", transcriptFileName);
 
             Assert.IsTrue(File.Exists(modelPath), $"Model not found at {modelPath}");
 
@@ -49,8 +50,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
             Assert.IsNotEmpty(wordTimestamps);
             
-            // The transcript is "I have that curiosity beside me at this moment" -> 9 words
-            Assert.AreEqual(9, wordTimestamps.Count, "Should have 9 words");
+            Assert.AreEqual(expectedWordCount, wordTimestamps.Count, $"Should have {expectedWordCount} words");
 
             double lastEnd = 0;
             foreach (var wt in wordTimestamps)

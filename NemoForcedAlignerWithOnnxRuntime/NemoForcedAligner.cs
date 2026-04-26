@@ -6,6 +6,7 @@ using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using NAudio.Vorbis;
 using NWaves.FeatureExtractors;
 using NWaves.FeatureExtractors.Options;
 using NWaves.Windows;
@@ -62,9 +63,19 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
         public float[] LoadAudio(string path)
         {
-            using (var reader = new AudioFileReader(path))
+            WaveStream reader;
+            if (path.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase))
             {
-                var resampler = new WdlResamplingSampleProvider(reader, SampleRate);
+                reader = new VorbisWaveReader(path);
+            }
+            else
+            {
+                reader = new AudioFileReader(path);
+            }
+
+            using (reader)
+            {
+                var resampler = new WdlResamplingSampleProvider(reader.ToSampleProvider(), SampleRate);
                 var mono = resampler.ToMono();
                 
                 var samples = new List<float>();
