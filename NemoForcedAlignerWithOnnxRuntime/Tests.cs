@@ -23,7 +23,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             
             string projectRoot = currentDir ?? throw new Exception("Could not find project root");
             
-            string modelPath = Path.Combine(projectRoot, "AiModels", "nfa_model.onnx");
+            string modelPath = Path.Combine(projectRoot, "AiModels", "stt_en_conformer_ctc_small.onnx");
             string tokensPath = Path.Combine(projectRoot, "AiModels", "tokens.txt");
             string audioPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav");
             string transcriptPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.txt");

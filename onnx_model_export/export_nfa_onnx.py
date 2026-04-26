@@ -3,7 +3,7 @@ import os
 
 def export_model():
     model_name = "stt_en_conformer_ctc_small"
-    onnx_file = "nfa_model.onnx"
+    onnx_file = "stt_en_conformer_ctc_small.onnx"
     tokens_file = "tokens.txt"
 
     print(f"Loading pretrained model: {model_name}...")
