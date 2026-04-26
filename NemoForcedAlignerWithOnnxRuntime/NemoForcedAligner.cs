@@ -13,7 +13,7 @@ using NWaves.Operations;
 
 namespace NemoForcedAlignerWithOnnxRuntime
 {
-    public class NemoForcedAligner
+    public class NemoForcedAligner : IDisposable
     {
         private const int SampleRate = 16000;
         private const int DownsamplingFactor = 4;
@@ -36,6 +36,11 @@ namespace NemoForcedAlignerWithOnnxRuntime
             }
 
             blankIndex = tokens.Length;
+        }
+
+        public void Dispose()
+        {
+            session?.Dispose();
         }
 
         public ForcedAlignmentResult Run(AudioData audioData, string transcript)

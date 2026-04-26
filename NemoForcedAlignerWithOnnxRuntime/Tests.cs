@@ -45,10 +45,12 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
             Assert.IsTrue(File.Exists(config.ModelPath), $"Model not found at {config.ModelPath}");
 
-            var aligner = new NemoForcedAligner(config.ModelPath, config.TokensPath);
-            
             var audioData = AudioLoader.LoadAudio(audioPath);
-            var alignment = aligner.Run(audioData, transcript);
+            NemoForcedAligner.ForcedAlignmentResult alignment;
+            using (var aligner = new NemoForcedAligner(config.ModelPath, config.TokensPath))
+            {
+                alignment = aligner.Run(audioData, transcript);
+            }
 
             foreach (var wordTimestamp in alignment.Words)
             {
