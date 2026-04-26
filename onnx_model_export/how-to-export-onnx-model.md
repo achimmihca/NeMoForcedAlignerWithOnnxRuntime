@@ -30,16 +30,37 @@ pip install onnx onnxruntime
 You do **not** need to download the model file manually. When you run the script, NeMo's `from_pretrained` method will automatically download the original model from the NVIDIA NGC registry to your local cache.
 
 ```powershell
-# Run the export script
+# Run the export script for the default English model
 python export_nfa_onnx.py
+
+# Run for other languages
+python export_nfa_onnx.py --model stt_de_conformer_ctc_large
+python export_nfa_onnx.py --model stt_es_conformer_ctc_large
+python export_nfa_onnx.py --model stt_fr_conformer_ctc_large
+
+# Run for a multilingual model (Canary)
+python export_nfa_onnx.py --model canary-1b
 ```
 
-### 5. Summary of Inputs/Outputs
-- **Model Source:** Automatically downloaded by the script from NVIDIA NGC (name: `stt_en_conformer_ctc_small`).
-- **Inputs for the script:** None (it pulls from the cloud).
+### 5. Multilingual Alternatives
+The following models are recommended for forced alignment. 
+
+| Language | Model Name (Large) | Model Name (Small/Medium) |
+| :--- | :--- | :--- |
+| **English** | `stt_en_conformer_ctc_large` | `stt_en_conformer_ctc_small` (Default) |
+| **German** | `stt_de_conformer_ctc_large` | `stt_de_citrinet_1024` (Medium) |
+| **Spanish** | `stt_es_conformer_ctc_large` | - |
+| **French** | `stt_fr_conformer_ctc_large` | `stt_fr_quartznet15x5` (Small) |
+| **Multilingual** | `canary-1b` | `canary-1b-flash` (Faster/Smaller) |
+
+*Note: If a specific `_small` Conformer model is not available for a language, you can try Citrinet or QuartzNet models which are generally smaller and faster, though potentially less accurate than Conformer Large.*
+
+### 6. Summary of Inputs/Outputs
+- **Model Source:** Automatically downloaded by the script from NVIDIA NGC or Hugging Face.
+- **Inputs for the script:** Optional `--model` and `--output` arguments.
 - **Outputs generated:**
-    - `nfa_model.onnx`: The exported model for use in C#.
-    - `tokens.txt`: The vocabulary file used for decoding.
+    - `{model_name}.onnx`: The exported model for use in C#.
+    - `tokens_{model_name}.txt`: The vocabulary file used for decoding.
 - **Audio Requirements (for C#):** The model expects 16kHz, Mono, 16-bit PCM WAV files.
 
 ### Note for Windows Users
