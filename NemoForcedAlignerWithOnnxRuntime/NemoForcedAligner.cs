@@ -247,42 +247,13 @@ namespace NemoForcedAlignerWithOnnxRuntime
             return path;
         }
 
-        public List<WordTimestamp> GetWordTimestamps(int[] path, List<int> targetIds)
+        public ForcedAlignmentResult GetAlignment(int[] path, List<int> targetIds)
         {
-            var result = new List<WordTimestamp>();
-            int targetIdx = 0;
-            
+            var result = new ForcedAlignmentResult();
             double frameDuration = 0.01 * DownsamplingFactor; // 10ms hop * downsampling
 
-            int currentWordStartFrame = -1;
-            string currentWord = "";
-
-            for (int t = 0; t < path.Length; t++)
-            {
-                int tokenId = path[t];
-                if (tokenId != _blankIndex)
-                {
-                    if (targetIdx < targetIds.Count && tokenId == targetIds[targetIdx])
-                    {
-                        string token = _tokens[tokenId];
-                        if (token.StartsWith("▁"))
-                        {
-                            // New word starts
-                            if (!string.IsNullOrEmpty(currentWord))
-                            {
-                                // End previous word
-                                // We'll estimate end time as current frame
-                            }
-                            // Actually we need to be more careful. 
-                            // A word starts when we first see its first token.
-                        }
-                        // This logic is a bit flawed because we might see the same token multiple times.
-                        // But for forced alignment, we know the sequence of tokens.
-                    }
-                }
-            }
-            
-            // Simpler approach: find the first frame for each token in targetIds
+            // 1. Calculate token-level timestamps
+            var tokenTimestamps = new List<TokenTimestamp>();
             int[] tokenStartFrames = new int[targetIds.Count];
             int currentT = 0;
             for (int i = 0; i < targetIds.Count; i++)
@@ -291,6 +262,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 {
                     currentT++;
                 }
+
                 tokenStartFrames[i] = currentT;
                 // Move past this token in path to find next one
                 while (currentT < path.Length && path[currentT] == targetIds[i])
@@ -301,33 +273,66 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
             for (int i = 0; i < targetIds.Count; i++)
             {
-                string token = _tokens[targetIds[i]];
-                if (token.StartsWith("▁"))
+                var tt = new TokenTimestamp
+                {
+                    Token = _tokens[targetIds[i]],
+                    StartTime = tokenStartFrames[i] * frameDuration
+                };
+
+                if (i < targetIds.Count - 1)
+                {
+                    tt.EndTime = tokenStartFrames[i + 1] * frameDuration;
+                }
+                else
+                {
+                    tt.EndTime = path.Length * frameDuration;
+                }
+
+                tokenTimestamps.Add(tt);
+            }
+
+            // 2. Aggregate into words
+            var wordTimestamps = new List<WordTimestamp>();
+            foreach (var tt in tokenTimestamps)
+            {
+                if (tt.Token.StartsWith("▁"))
                 {
                     var wt = new WordTimestamp
                     {
-                        Word = token.Substring(1),
-                        StartTime = tokenStartFrames[i] * frameDuration
+                        Word = tt.Token.Substring(1),
+                        StartTime = tt.StartTime,
+                        EndTime = tt.EndTime
                     };
-                    result.Add(wt);
+                    wt.Tokens.Add(tt);
+                    wordTimestamps.Add(wt);
                 }
-                else if (result.Count > 0)
+                else if (wordTimestamps.Count > 0)
                 {
-                    result.Last().Word += token;
+                    var lastWord = wordTimestamps.Last();
+                    lastWord.Word += tt.Token;
+                    lastWord.EndTime = tt.EndTime;
+                    lastWord.Tokens.Add(tt);
                 }
-            }
-            
-            // Set end times
-            for (int i = 0; i < result.Count; i++)
-            {
-                if (i < result.Count - 1)
-                    result[i].EndTime = result[i + 1].StartTime;
-                else
-                    result[i].EndTime = path.Length * frameDuration;
             }
 
+            result.Tokens = tokenTimestamps;
+            result.Words = wordTimestamps;
             return result;
         }
+    }
+
+    public class ForcedAlignmentResult
+    {
+        public List<WordTimestamp> Words { get; set; } = new List<WordTimestamp>();
+        public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
+    }
+
+    public class TokenTimestamp
+    {
+        public string Token { get; set; }
+        public double StartTime { get; set; }
+        public double EndTime { get; set; }
+        public override string ToString() => $"'{Token}': {StartTime:F2} - {EndTime:F2}";
     }
 
     public class WordTimestamp
@@ -335,6 +340,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
         public string Word { get; set; }
         public double StartTime { get; set; }
         public double EndTime { get; set; }
-        public override string ToString() => $"{Word}: {StartTime:F2} - {EndTime:F2}";
+        public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
+        public override string ToString() => $"{Word}: {StartTime:F2} - {EndTime:F2} ({Tokens.Count} tokens)";
     }
 }

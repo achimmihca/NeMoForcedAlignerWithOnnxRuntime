@@ -54,28 +54,42 @@ namespace NemoForcedAlignerWithOnnxRuntime
             var targetIds = aligner.Tokenize(transcript);
             
             var path = aligner.ViterbiAlign(logprobs, targetIds);
-            var wordTimestamps = aligner.GetWordTimestamps(path, targetIds);
+            var alignment = aligner.GetAlignment(path, targetIds);
 
-            foreach (var wt in wordTimestamps)
+            foreach (var wordTimestamp in alignment.Words)
             {
-                Console.WriteLine($"[DEBUG_LOG] {wt}");
+                Console.WriteLine($"{wordTimestamp}");
+                foreach (var tokenTimestamp in wordTimestamp.Tokens)
+                {
+                    Console.WriteLine($"{tokenTimestamp}");
+                }
             }
 
-            Assert.IsNotEmpty(wordTimestamps);
+            Assert.IsNotEmpty(alignment.Words);
+            Assert.IsNotEmpty(alignment.Tokens);
             
-            Assert.AreEqual(expectedWordCount, wordTimestamps.Count, $"Should have {expectedWordCount} words");
+            Assert.AreEqual(expectedWordCount, alignment.Words.Count, $"Should have {expectedWordCount} words");
 
             double lastEnd = 0;
-            foreach (var wt in wordTimestamps)
+            foreach (var wt in alignment.Words)
             {
                 Assert.GreaterOrEqual(wt.StartTime, 0, $"Start time for {wt.Word} should be >= 0");
                 Assert.Greater(wt.EndTime, wt.StartTime, $"End time for {wt.Word} should be > Start time");
                 Assert.GreaterOrEqual(wt.StartTime, lastEnd, $"Start time for {wt.Word} should be >= previous end time");
                 lastEnd = wt.EndTime;
+
+                double lastTokenEnd = wt.StartTime;
+                foreach (var tt in wt.Tokens)
+                {
+                    Assert.GreaterOrEqual(tt.StartTime, lastTokenEnd, $"Token {tt.Token} start time should be >= previous token end time");
+                    Assert.Greater(tt.EndTime, tt.StartTime, $"Token {tt.Token} end time should be > start time");
+                    Assert.LessOrEqual(tt.EndTime, wt.EndTime + 0.001, $"Token {tt.Token} end time should be <= word end time");
+                    lastTokenEnd = tt.EndTime;
+                }
             }
             
             double audioDuration = audioData.Samples.Length / (double)audioData.SampleRate;
-            Assert.LessOrEqual(wordTimestamps.Last().EndTime, audioDuration + 0.1, "End time should be within audio duration");
+            Assert.LessOrEqual(alignment.Words.Last().EndTime, audioDuration + 0.1, "End time should be within audio duration");
         }
     }
 }
