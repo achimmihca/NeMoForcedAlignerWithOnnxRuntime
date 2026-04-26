@@ -1,5 +1,8 @@
 using System;
 using NUnit.Framework;
+using Microsoft.ML.OnnxRuntime;
+using NAudio;
+using NWaves;
 
 namespace NemoForcedAlignerWithOnnxRuntime
 {
