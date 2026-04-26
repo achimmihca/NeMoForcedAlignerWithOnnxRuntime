@@ -97,10 +97,15 @@
     </ItemGroup>
     <ItemGroup>
         <Compile Include="Tests.cs" />
+        <Compile Include="NemoForcedAligner.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />
     </ItemGroup>
     <ItemGroup>
       <None Include="packages.config" />
+    </ItemGroup>
+    <ItemGroup>
+      <Content Include="TestData\Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.txt" />
+      <Content Include="TestData\Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav" />
     </ItemGroup>
     <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
     <Import Project="..\packages\Microsoft.ML.OnnxRuntime.Managed.1.25.0\build\netstandard2.0\Microsoft.ML.OnnxRuntime.Managed.targets" Condition="Exists('..\packages\Microsoft.ML.OnnxRuntime.Managed.1.25.0\build\netstandard2.0\Microsoft.ML.OnnxRuntime.Managed.targets')" />
