@@ -43,7 +43,8 @@ python export_nfa_onnx.py --model canary-1b
 ```
 
 ### 5. Multilingual Alternatives
-The following models are recommended for forced alignment. 
+The following models are recommended for forced alignment.
+See https://docs.nvidia.com/nemo-framework/user-guide/latest/nemotoolkit/asr/results.html#fast-conformer-hybrid
 
 | Language | Model Name (Large) | Model Name (Small/Medium) |
 | :--- | :--- | :--- |

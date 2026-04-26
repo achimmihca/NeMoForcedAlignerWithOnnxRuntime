@@ -13,12 +13,26 @@ using NWaves.Operations;
 
 namespace NemoForcedAlignerWithOnnxRuntime
 {
+    public class NemoForcedAlignerConfiguration
+    {
+        public string Language { get; set; }
+        public string ModelPath { get; set; }
+        public string TokensPath { get; set; }
+
+        public NemoForcedAlignerConfiguration(string language, string modelPath, string tokensPath)
+        {
+            Language = language;
+            ModelPath = modelPath;
+            TokensPath = tokensPath;
+        }
+    }
+
     public class NemoForcedAligner
     {
         private readonly string[] _tokens;
         private readonly Dictionary<string, int> _tokenToId;
         private readonly InferenceSession _session;
-        private const int BlankIndex = 1024;
+        private readonly int _blankIndex;
         private const int SampleRate = 16000;
         private const int DownsamplingFactor = 4;
 
@@ -31,6 +45,12 @@ namespace NemoForcedAlignerWithOnnxRuntime
             {
                 _tokenToId[_tokens[i]] = i;
             }
+
+            _blankIndex = _tokens.Length;
+        }
+
+        public NemoForcedAligner(NemoForcedAlignerConfiguration config) : this(config.ModelPath, config.TokensPath)
+        {
         }
 
         public List<int> Tokenize(string text)
@@ -167,10 +187,10 @@ namespace NemoForcedAlignerWithOnnxRuntime
             int[] augmented = new int[2 * targetIds.Count + 1];
             for (int i = 0; i < targetIds.Count; i++)
             {
-                augmented[2 * i] = BlankIndex;
+                augmented[2 * i] = _blankIndex;
                 augmented[2 * i + 1] = targetIds[i];
             }
-            augmented[augmented.Length - 1] = BlankIndex;
+            augmented[augmented.Length - 1] = _blankIndex;
 
             int S = augmented.Length;
             float[,] dp = new float[T, S];
@@ -199,7 +219,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     }
 
                     // From s-2 (if current is not blank and s-1 is blank and target[s] != target[s-2])
-                    if (s > 1 && augmented[s] != BlankIndex && augmented[s] != augmented[s - 2])
+                    if (s > 1 && augmented[s] != _blankIndex && augmented[s] != augmented[s - 2])
                     {
                         if (dp[t - 1, s - 2] > bestPrevLogProb)
                         {
@@ -240,7 +260,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             for (int t = 0; t < path.Length; t++)
             {
                 int tokenId = path[t];
-                if (tokenId != BlankIndex)
+                if (tokenId != _blankIndex)
                 {
                     if (targetIdx < targetIds.Count && tokenId == targetIds[targetIdx])
                     {
