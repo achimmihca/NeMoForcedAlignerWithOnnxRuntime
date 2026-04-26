@@ -36,9 +36,6 @@ ScaffoldingReadMe.txt
 # NuGet Symbol Packages
 *.snupkg
 
-# dotenv environment variables file
-.env
-
 # Others
 ~$*
 *~
@@ -55,3 +52,15 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Packages
+packages/
+
+# User settings
+*.sln.DotSettings.user
+
+# JetBrains Rider
+.idea/
+
+# AI model
+*.onnx
