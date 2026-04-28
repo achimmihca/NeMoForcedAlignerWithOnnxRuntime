@@ -8,6 +8,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
     [TestFixture]
     public class Tests
     {
+        [TestCase("en", "vocals.ogg", "vocals.txt", -1)]
         [TestCase("en", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.txt", 9)]
         [TestCase("es", "Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.ogg", "Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.txt", 15)]
         [TestCase("de", "Excerpt-Kurzgesagt-DasImmunsystemErklärt.ogg", "Excerpt-Kurzgesagt-DasImmunsystemErklärt.txt", 14)]
@@ -26,8 +27,11 @@ namespace NemoForcedAlignerWithOnnxRuntime
             var configs = new[]
             {
                 new NemoForcedAligner.Configuration("en", 
-                    Path.Combine(projectRoot, "onnx_model_export", "stt_en_conformer_ctc_small.onnx"),
-                    Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_conformer_ctc_small.txt")),
+                    Path.Combine(projectRoot, "onnx_model_export", "stt_en_fastconformer_hybrid_large_pc.onnx"),
+                    Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_fastconformer_hybrid_large_pc.txt")),
+                // new NemoForcedAligner.Configuration("en", 
+                //     Path.Combine(projectRoot, "onnx_model_export", "stt_en_conformer_ctc_small.onnx"),
+                //     Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_conformer_ctc_small.txt")),
                 new NemoForcedAligner.Configuration("de", 
                     Path.Combine(projectRoot, "onnx_model_export", "stt_de_conformer_ctc_large.onnx"),
                     Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_de_conformer_ctc_large.txt")),
@@ -41,7 +45,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             
             string audioPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", audioFileName);
             string transcriptPath = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestData", transcriptFileName);
-            string transcript = File.ReadAllText(transcriptPath).Trim();
+            string transcript = File.ReadAllText(transcriptPath).Replace("\n", " ").Trim();
 
             Assert.IsTrue(File.Exists(config.ModelPath), $"Model not found at {config.ModelPath}");
 
@@ -55,16 +59,15 @@ namespace NemoForcedAlignerWithOnnxRuntime
             foreach (var wordTimestamp in alignment.Words)
             {
                 Console.WriteLine($"{wordTimestamp}");
-                foreach (var tokenTimestamp in wordTimestamp.Tokens)
-                {
-                    Console.WriteLine($"{tokenTimestamp}");
-                }
             }
 
             Assert.IsNotEmpty(alignment.Words);
             Assert.IsNotEmpty(alignment.Tokens);
-            
-            Assert.AreEqual(expectedWordCount, alignment.Words.Count, $"Should have {expectedWordCount} words");
+
+            if (expectedWordCount > 0)
+            {
+                Assert.AreEqual(expectedWordCount, alignment.Words.Count, $"Should have {expectedWordCount} words");
+            }
 
             double lastEnd = 0;
             foreach (var wt in alignment.Words)
@@ -86,6 +89,40 @@ namespace NemoForcedAlignerWithOnnxRuntime
             
             double audioDuration = audioData.Samples.Length / (double)audioData.SampleRate;
             Assert.LessOrEqual(alignment.Words.Last().EndTime, audioDuration + 0.1, "End time should be within audio duration");
+
+            // Extract audio snippets for words
+            string testResultsBase = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestResults");
+            string audioOutputFolder = Path.Combine(testResultsBase, Path.GetFileNameWithoutExtension(audioFileName));
+            if (Directory.Exists(audioOutputFolder))
+            {
+                Directory.Delete(audioOutputFolder, true);
+            }
+            Directory.CreateDirectory(audioOutputFolder);
+
+            for (int i = 0; i < alignment.Words.Count; i++)
+            {
+                var wordTimestamp = alignment.Words[i];
+                int startFrame = (int)(wordTimestamp.StartTime * audioData.SampleRate);
+                int endFrame = (int)(wordTimestamp.EndTime * audioData.SampleRate);
+                
+                // Ensure frames are within range
+                int totalFrames = audioData.Samples.Length / audioData.ChannelCount;
+                startFrame = Math.Max(0, Math.Min(startFrame, totalFrames));
+                endFrame = Math.Max(0, Math.Min(endFrame, totalFrames));
+                
+                if (endFrame > startFrame)
+                {
+                    int startSample = startFrame * audioData.ChannelCount;
+                    int endSample = endFrame * audioData.ChannelCount;
+                    float[] wordSamples = new float[endSample - startSample];
+                    Array.Copy(audioData.Samples, startSample, wordSamples, 0, wordSamples.Length);
+                    
+                    string safeWord = string.Concat(wordTimestamp.Word.Where(c => !Path.GetInvalidFileNameChars().Contains(c)));
+                    string wordAudioFileName = $"{(i + 1):D2} - {safeWord}.wav";
+                    string wordAudioPath = Path.Combine(audioOutputFolder, wordAudioFileName);
+                    AudioSaver.SaveAudio(wordAudioPath, wordSamples, audioData.SampleRate, audioData.ChannelCount);
+                }
+            }
         }
     }
 }

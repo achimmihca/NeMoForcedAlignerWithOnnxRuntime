@@ -16,7 +16,6 @@ namespace NemoForcedAlignerWithOnnxRuntime
     public class NemoForcedAligner : IDisposable
     {
         private const int SampleRate = 16000;
-        private const int DownsamplingFactor = 4;
 
         private readonly string[] tokens;
         private readonly Dictionary<string, int> tokenToId;
@@ -43,6 +42,11 @@ namespace NemoForcedAlignerWithOnnxRuntime
             session?.Dispose();
         }
 
+        /// <summary>
+        /// Runs forced alignment for the given audio and transcript.
+        /// Assumes audio is 16kHz Mono (resampled if necessary).
+        /// Assumes the ONNX model has an input 'audio_signal' and 'length', and output 'logprobs'.
+        /// </summary>
         public ForcedAlignmentResult Run(AudioData audioData, string transcript)
         {
             var features = ExtractFeatures(audioData);
@@ -50,7 +54,23 @@ namespace NemoForcedAlignerWithOnnxRuntime
             var targetIds = Tokenize(transcript);
 
             var path = ViterbiAlign(logprobs, targetIds);
-            var alignment = GetAlignment(path, targetIds);
+
+            // Calculate frame duration dynamically.
+            // Assumption: Features use 10ms hop (160 samples at 16kHz).
+            // The model downsamples these features by some factor (usually 4 or 8).
+            double inputFrameDuration = 0.01; // 10ms
+            int numInputFrames = features.FrameCount;
+            int numOutputFrames = logprobs.Data.GetLength(0);
+            
+            // We use the same logic as the Python implementation to calculate the output timestep duration.
+            // downsampleFactor = round(numInputFrames / numOutputFrames)
+            double downsamplingFactor = Math.Round((double)numInputFrames / numOutputFrames);
+            double outputFrameDuration = inputFrameDuration * downsamplingFactor;
+
+            Console.WriteLine($"[DEBUG_LOG] Input frames: {numInputFrames}, Output frames: {numOutputFrames}, Calculated Downsampling: {downsamplingFactor}, Output frame duration: {outputFrameDuration:F4}s");
+
+            int S = 2 * targetIds.Count + 1;
+            var alignment = GetAlignment(path, targetIds, outputFrameDuration, S);
             return alignment;
         }
 
@@ -82,6 +102,11 @@ namespace NemoForcedAlignerWithOnnxRuntime
             return result;
         }
 
+        /// <summary>
+        /// Extracts Mel Spectrogram features.
+        /// Assumption: 64 mel bins, 400 sample window (25ms), 160 sample hop (10ms).
+        /// Matches NeMo's default preprocessor configuration for many models.
+        /// </summary>
         private AudioFeatures ExtractFeatures(AudioData audioData)
         {
             float[] samples = audioData.Samples;
@@ -159,6 +184,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
             var lengthTensor = new DenseTensor<long>(new[] { 1 });
             lengthTensor[0] = numFrames;
 
+            Console.WriteLine($"[DEBUG_LOG] Input tensor shape: 1x{numBins}x{numFrames}");
+
             var inputs = new List<NamedOnnxValue>
             {
                 NamedOnnxValue.CreateFromTensor("audio_signal", tensor),
@@ -170,6 +197,22 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 var logprobsTensor = results.First(r => r.Name == "logprobs").AsTensor<float>();
                 int outFrames = logprobsTensor.Dimensions[1];
                 int vocabSize = logprobsTensor.Dimensions[2];
+
+                Console.WriteLine($"[DEBUG_LOG] Output logprobs tensor shape: 1x{outFrames}x{vocabSize}");
+
+                // Print max logprob for first few frames for debugging
+                for (int t = 0; t < Math.Min(5, outFrames); t++)
+                {
+                    float maxVal = float.NegativeInfinity;
+                    int maxIdx = -1;
+                    for (int v = 0; v < vocabSize; v++)
+                    {
+                        float val = logprobsTensor[0, t, v];
+                        if (val > maxVal) { maxVal = val; maxIdx = v; }
+                    }
+                    string token = (maxIdx < tokens.Length) ? tokens[maxIdx] : "[BLANK]";
+                    Console.WriteLine($"[DEBUG_LOG]   Frame {t}: max logprob {maxVal:F4} for token '{token}'");
+                }
 
                 var output = new float[outFrames, vocabSize];
                 for (int t = 0; t < outFrames; t++)
@@ -184,6 +227,10 @@ namespace NemoForcedAlignerWithOnnxRuntime
             }
         }
 
+        /// <summary>
+        /// Performs Viterbi decoding to find the most likely alignment path.
+        /// The path consists of state indices in the 'augmented' sequence.
+        /// </summary>
         private int[] ViterbiAlign(LogProbs logProbs, List<int> targetIds)
         {
             float[,] logprobs = logProbs.Data;
@@ -245,57 +292,65 @@ namespace NemoForcedAlignerWithOnnxRuntime
             int currentS = (dp[T - 1, S - 1] > dp[T - 1, S - 2]) ? S - 1 : S - 2;
             for (int t = T - 1; t >= 0; t--)
             {
-                path[t] = augmented[currentS];
+                path[t] = currentS;
                 currentS = backtrack[t, currentS];
             }
 
             return path;
         }
 
-        private ForcedAlignmentResult GetAlignment(int[] path, List<int> targetIds)
+        /// <summary>
+        /// Converts the Viterbi path into word and token timestamps.
+        /// Logic is aligned with NeMo Forced Aligner's Python implementation.
+        /// </summary>
+        private ForcedAlignmentResult GetAlignment(int[] path, List<int> targetIds, double frameDuration, int S)
         {
             var result = new ForcedAlignmentResult();
-            double frameDuration = 0.01 * DownsamplingFactor; // 10ms hop * downsampling
 
-            // 1. Calculate token-level timestamps
-            var tokenTimestamps = new List<TokenTimestamp>();
-            int[] tokenStartFrames = new int[targetIds.Count];
-            int currentT = 0;
-            for (int i = 0; i < targetIds.Count; i++)
+            // 1. Find first and last appearance of each state in the path
+            int[] firstAppearance = new int[S];
+            int[] lastAppearance = new int[S];
+            for (int s = 0; s < S; s++)
             {
-                while (currentT < path.Length && path[currentT] != targetIds[i])
-                {
-                    currentT++;
-                }
-
-                tokenStartFrames[i] = currentT;
-                // Move past this token in path to find next one
-                while (currentT < path.Length && path[currentT] == targetIds[i])
-                {
-                    currentT++;
-                }
+                firstAppearance[s] = -1;
+                lastAppearance[s] = -1;
             }
 
+            for (int t = 0; t < path.Length; t++)
+            {
+                int s = path[t];
+                if (firstAppearance[s] == -1) firstAppearance[s] = t;
+                lastAppearance[s] = t;
+            }
+
+            // 2. Calculate token-level timestamps
+            // Token i is at state 2*i + 1 in the augmented sequence
+            var tokenTimestamps = new List<TokenTimestamp>();
             for (int i = 0; i < targetIds.Count; i++)
             {
+                int stateIdx = 2 * i + 1;
+                int startFrame = firstAppearance[stateIdx];
+                int endFrame = lastAppearance[stateIdx];
+
+                // If a token was skipped in the path (should not happen in CTC forced alignment),
+                // we'll use the frame of the previous/next state.
+                if (startFrame == -1)
+                {
+                    // Fallback: use the end of the previous state or start of the next
+                    startFrame = (stateIdx > 0) ? lastAppearance[stateIdx - 1] + 1 : 0;
+                    endFrame = startFrame;
+                }
+
                 var tt = new TokenTimestamp
                 {
-                    Token = tokens[targetIds[i]], StartTime = tokenStartFrames[i] * frameDuration
+                    Token = tokens[targetIds[i]],
+                    StartTime = startFrame * frameDuration,
+                    EndTime = (endFrame + 1) * frameDuration
                 };
-
-                if (i < targetIds.Count - 1)
-                {
-                    tt.EndTime = tokenStartFrames[i + 1] * frameDuration;
-                }
-                else
-                {
-                    tt.EndTime = path.Length * frameDuration;
-                }
-
                 tokenTimestamps.Add(tt);
             }
 
-            // 2. Aggregate into words
+            // 3. Aggregate into words
             var wordTimestamps = new List<WordTimestamp>();
             foreach (var tt in tokenTimestamps)
             {
