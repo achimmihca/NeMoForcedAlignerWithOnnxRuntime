@@ -43,18 +43,8 @@ python export_nfa_onnx.py --model canary-1b
 ```
 
 ### 5. Multilingual Alternatives
-The following models are recommended for forced alignment.
-See https://docs.nvidia.com/nemo-framework/user-guide/latest/nemotoolkit/asr/results.html#fast-conformer-hybrid
-
-| Language | Model Name (Large) | Model Name (Small/Medium) |
-| :--- | :--- | :--- |
-| **English** | `stt_en_conformer_ctc_large` | `stt_en_conformer_ctc_small` (Default) |
-| **German** | `stt_de_conformer_ctc_large` | `stt_de_citrinet_1024` (Medium) |
-| **Spanish** | `stt_es_conformer_ctc_large` | - |
-| **French** | `stt_fr_conformer_ctc_large` | `stt_fr_quartznet15x5` (Small) |
-| **Multilingual** | `canary-1b` | `canary-1b-flash` (Faster/Smaller) |
-
-*Note: If a specific `_small` Conformer model is not available for a language, you can try Citrinet or QuartzNet models which are generally smaller and faster, though potentially less accurate than Conformer Large.*
+CTC models are recommended for forced alignment.
+See https://docs.nvidia.com/nemo-framework/user-guide/latest/nemotoolkit/asr/all_chkpt.html
 
 ### 6. Summary of Inputs/Outputs
 - **Model Source:** Automatically downloaded by the script from NVIDIA NGC or Hugging Face.

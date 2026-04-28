@@ -29,8 +29,18 @@ def export_model():
     print(f"Exporting model to {onnx_file}...")
     model.export(onnx_file)
 
+    # Print some useful metadata for the consumer
+    if hasattr(model, 'cfg') and hasattr(model.cfg, 'preprocessor'):
+        n_mels = model.cfg.preprocessor.get('n_mels')
+        sample_rate = model.cfg.preprocessor.get('sample_rate')
+        print(f"Preprocessor: n_mels={n_mels}, sample_rate={sample_rate}")
+    if hasattr(model, 'decoder') and hasattr(model.decoder, 'blank_idx'):
+        print(f"Blank index: {model.decoder.blank_idx}")
+    
     print(f"Extracting vocabulary to {tokens_file}...")
-    if hasattr(model, 'decoder') and hasattr(model.decoder, 'vocabulary'):
+    if hasattr(model, 'vocabulary'):
+        tokens = model.vocabulary
+    elif hasattr(model, 'decoder') and hasattr(model.decoder, 'vocabulary'):
         tokens = model.decoder.vocabulary
     elif hasattr(model, 'tokenizer') and hasattr(model.tokenizer, 'vocab'):
         # Some models might have tokenizer instead of decoder.vocabulary
@@ -39,8 +49,14 @@ def export_model():
         # Generic way to get labels
         tokens = model.cfg.decoder.vocabulary if hasattr(model.cfg, 'decoder') else model.cfg.labels
 
+    # If tokens is a dict (vocab to id), sort it by id and get the keys
+    if isinstance(tokens, dict):
+        tokens = [k for k, v in sorted(tokens.items(), key=lambda x: x[1])]
+
     with open(tokens_file, "w", encoding="utf-8") as f:
         for token in tokens:
+            if token == " ":
+                print("Warning: literal space token detected. C# code must not filter whitespace-only lines.")
             f.write(token + "\n")
 
     print("Done!")
