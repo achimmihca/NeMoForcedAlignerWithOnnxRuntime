@@ -67,9 +67,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
             int numOutputFrames = logprobs.Data.GetLength(0);
             
             // We use the same logic as the Python implementation to calculate the output timestep duration.
-            // downsampleFactor = round(numInputFrames / numOutputFrames)
-            double downsamplingFactor = Math.Round((double)numInputFrames / numOutputFrames);
-            double outputFrameDuration = inputFrameDuration * downsamplingFactor;
+            // But we avoid rounding the downsampling factor to keep maximum precision.
+            double outputFrameDuration = inputFrameDuration * numInputFrames / numOutputFrames;
 
 
             int S = 2 * targetIds.Count + 1;
@@ -350,8 +349,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
             }
 
             // 2. Calculate token-level timestamps
-            // Logic: Each token starts at its first appearance and lasts until the NEXT token starts.
-            // This ensures words are contiguous and include the following blanks.
+            // Logic: Each token starts at its first appearance and ends at its last appearance.
+            // This ensures maximum precision and correctly identifies gaps (blanks) between tokens and words.
             var tokenTimestamps = new List<TokenTimestamp>();
             for (int i = 0; i < targetIds.Count; i++)
             {
@@ -364,29 +363,6 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     // Fallback: use the end of the previous state or start of the next
                     startFrame = (stateIdx > 0) ? lastAppearance[stateIdx - 1] + 1 : 0;
                     endFrame = startFrame;
-                }
-                else
-                {
-                    // Extend to next token
-                    int nextTokenStart = -1;
-                    for (int j = i + 1; j < targetIds.Count; j++)
-                    {
-                        int nextStateIdx = 2 * j + 1;
-                        if (firstAppearance[nextStateIdx] != -1)
-                        {
-                            nextTokenStart = firstAppearance[nextStateIdx];
-                            break;
-                        }
-                    }
-
-                    if (nextTokenStart != -1)
-                    {
-                        endFrame = nextTokenStart - 1;
-                    }
-                    else
-                    {
-                        endFrame = path.Length - 1;
-                    }
                 }
 
                 var tt = new TokenTimestamp
