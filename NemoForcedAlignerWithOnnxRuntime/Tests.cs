@@ -86,7 +86,19 @@ namespace NemoForcedAlignerWithOnnxRuntime
             double audioDuration = audioData.Samples.Length / (double)audioData.SampleRate;
             Assert.LessOrEqual(alignment.Words.Last().EndTime, audioDuration + 0.1, "End time should be within audio duration");
 
-            // Extract audio snippets for words
+            SaveAudioSnippetsForWords(audioFileName, projectRoot, alignment, audioData);
+        }
+
+        private static void SaveAudioSnippetsForWords(
+            string audioFileName,
+            string projectRoot,
+            NemoForcedAligner.ForcedAlignmentResult alignment,
+            NemoForcedAligner.AudioData audioData)
+        {
+            double audioDurationMs = (double)audioData.Samples.Length / audioData.ChannelCount / audioData.SampleRate;
+            NemoForcedAligner.ForcedAlignmentResult paddedAlignment =
+                new WordTimestampPadder(80, 80, 200, audioDurationMs).PadTimestamps(alignment);
+            
             string testResultsBase = Path.Combine(projectRoot, "NemoForcedAlignerWithOnnxRuntime", "TestResults");
             string audioOutputFolder = Path.Combine(testResultsBase, Path.GetFileNameWithoutExtension(audioFileName));
             if (Directory.Exists(audioOutputFolder))
@@ -95,9 +107,9 @@ namespace NemoForcedAlignerWithOnnxRuntime
             }
             Directory.CreateDirectory(audioOutputFolder);
 
-            for (int i = 0; i < alignment.Words.Count; i++)
+            for (int i = 0; i < paddedAlignment.Words.Count; i++)
             {
-                var wordTimestamp = alignment.Words[i];
+                var wordTimestamp = paddedAlignment.Words[i];
                 int startFrame = (int)(wordTimestamp.StartTime * audioData.SampleRate);
                 int endFrame = (int)(wordTimestamp.EndTime * audioData.SampleRate);
                 

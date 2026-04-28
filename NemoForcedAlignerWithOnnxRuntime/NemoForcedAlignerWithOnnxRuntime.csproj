@@ -109,6 +109,8 @@
         <Compile Include="AudioSaver.cs" />
         <Compile Include="Tests.cs" />
         <Compile Include="NemoForcedAligner.cs" />
+        <Compile Include="WordTimestampPadder.cs" />
+        <Compile Include="WordTimestampPadderTests.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />
     </ItemGroup>
     <ItemGroup>
