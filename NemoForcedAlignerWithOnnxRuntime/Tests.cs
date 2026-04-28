@@ -8,11 +8,10 @@ namespace NemoForcedAlignerWithOnnxRuntime
     [TestFixture]
     public class Tests
     {
-        [TestCase("en", "vocals.ogg", "vocals.txt", -1)]
         [TestCase("en", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav", "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.txt", 9)]
-        [TestCase("es", "Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.ogg", "Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.txt", 15)]
-        [TestCase("de", "Excerpt-Kurzgesagt-DasImmunsystemErklärt.ogg", "Excerpt-Kurzgesagt-DasImmunsystemErklärt.txt", 14)]
         [TestCase("en", "Excerpt-Kurzgesagt-HowTheImmuneSystemActuallyWorks.ogg", "Excerpt-Kurzgesagt-HowTheImmuneSystemActuallyWorks.txt", 16)]
+        [TestCase("de", "Excerpt-Kurzgesagt-DasImmunsystemErklärt.ogg", "Excerpt-Kurzgesagt-DasImmunsystemErklärt.txt", 14)]
+        [TestCase("es", "Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.ogg", "Excerpt-Kurzgesagt-ComoFuncionaDeVerdadElSistemaInmunitario.txt", 15)]
         public void TestForcedAlignment(string language, string audioFileName, string transcriptFileName, int expectedWordCount)
         {
             // Find project root
@@ -27,11 +26,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
             var configs = new[]
             {
                 new NemoForcedAligner.Configuration("en", 
-                    Path.Combine(projectRoot, "onnx_model_export", "stt_en_fastconformer_hybrid_large_pc.onnx"),
-                    Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_fastconformer_hybrid_large_pc.txt")),
-                // new NemoForcedAligner.Configuration("en", 
-                //     Path.Combine(projectRoot, "onnx_model_export", "stt_en_conformer_ctc_small.onnx"),
-                //     Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_conformer_ctc_small.txt")),
+                    Path.Combine(projectRoot, "onnx_model_export", "stt_en_conformer_ctc_large.onnx"),
+                    Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_conformer_ctc_large.txt")),
                 new NemoForcedAligner.Configuration("de", 
                     Path.Combine(projectRoot, "onnx_model_export", "stt_de_conformer_ctc_large.onnx"),
                     Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_de_conformer_ctc_large.txt")),

@@ -26,7 +26,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
         {
             session = new InferenceSession(modelPath);
             tokens = File.ReadAllLines(tokensPath)
-                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .Where(l => l.Length > 0)
                 .ToArray();
             tokenToId = new Dictionary<string, int>();
             for (int i = 0; i < tokens.Length; i++)
@@ -53,6 +53,10 @@ namespace NemoForcedAlignerWithOnnxRuntime
             var logprobs = RunInference(features);
             var targetIds = Tokenize(transcript);
 
+            Console.WriteLine($"[DEBUG_LOG] Transcript: {(transcript.Length > 100 ? transcript.Substring(0, 100) + "..." : transcript)}");
+            Console.WriteLine($"[DEBUG_LOG] Token IDs (first 100): {string.Join(", ", targetIds.Take(100))}");
+            Console.WriteLine($"[DEBUG_LOG] Tokens (first 100): {string.Join(", ", targetIds.Take(100).Select(id => tokens[id]))}");
+
             var path = ViterbiAlign(logprobs, targetIds);
 
             // Calculate frame duration dynamically.
@@ -67,7 +71,6 @@ namespace NemoForcedAlignerWithOnnxRuntime
             double downsamplingFactor = Math.Round((double)numInputFrames / numOutputFrames);
             double outputFrameDuration = inputFrameDuration * downsamplingFactor;
 
-            Console.WriteLine($"[DEBUG_LOG] Input frames: {numInputFrames}, Output frames: {numOutputFrames}, Calculated Downsampling: {downsamplingFactor}, Output frame duration: {outputFrameDuration:F4}s");
 
             int S = 2 * targetIds.Count + 1;
             var alignment = GetAlignment(path, targetIds, outputFrameDuration, S);
@@ -76,7 +79,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
         private List<int> Tokenize(string text)
         {
-            text = text.ToLowerInvariant().Replace(" ", "▁");
+            text = text.Replace(" ", "▁");
             if (!text.StartsWith("▁")) text = "▁" + text;
 
             var result = new List<int>();
@@ -94,9 +97,24 @@ namespace NemoForcedAlignerWithOnnxRuntime
                         found = true;
                         break;
                     }
+
+                    // Try lowercase if original case is not found
+                    string subLower = sub.ToLowerInvariant();
+                    if (subLower != sub && tokenToId.TryGetValue(subLower, out id))
+                    {
+                        result.Add(id);
+                        pos += len;
+                        found = true;
+                        break;
+                    }
                 }
 
-                if (!found) pos++;
+                if (!found)
+                {
+                    // If even lowercase is not found, we skip the character to avoid infinite loop.
+                    // This might happen for punctuation or characters not in the vocabulary at all.
+                    pos++;
+                }
             }
 
             return result;
@@ -104,8 +122,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
         /// <summary>
         /// Extracts Mel Spectrogram features.
-        /// Assumption: 64 mel bins, 400 sample window (25ms), 160 sample hop (10ms).
-        /// Matches NeMo's default preprocessor configuration for many models.
+        /// Assumption: 80 mel bins, 400 sample window (25ms), 160 sample hop (10ms).
+        /// Matches NeMo's default preprocessor configuration for many models (e.g. Conformer).
         /// </summary>
         private AudioFeatures ExtractFeatures(AudioData audioData)
         {
@@ -164,6 +182,29 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 }
             }
 
+            // Normalization: per-feature (standardize each mel bin across time)
+            int numFrames = features.Count;
+            int numBins = options.FilterBankSize;
+            for (int b = 0; b < numBins; b++)
+            {
+                double sum = 0;
+                double sumSq = 0;
+                for (int t = 0; t < numFrames; t++)
+                {
+                    float val = features[t][b];
+                    sum += val;
+                    sumSq += val * val;
+                }
+
+                double mean = sum / numFrames;
+                double std = Math.Sqrt(Math.Max(0, (sumSq / numFrames) - (mean * mean))) + 1e-5;
+
+                for (int t = 0; t < numFrames; t++)
+                {
+                    features[t][b] = (float)((features[t][b] - mean) / std);
+                }
+            }
+
             return new AudioFeatures { Data = features.ToArray() };
         }
 
@@ -184,7 +225,6 @@ namespace NemoForcedAlignerWithOnnxRuntime
             var lengthTensor = new DenseTensor<long>(new[] { 1 });
             lengthTensor[0] = numFrames;
 
-            Console.WriteLine($"[DEBUG_LOG] Input tensor shape: 1x{numBins}x{numFrames}");
 
             var inputs = new List<NamedOnnxValue>
             {
@@ -198,21 +238,6 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 int outFrames = logprobsTensor.Dimensions[1];
                 int vocabSize = logprobsTensor.Dimensions[2];
 
-                Console.WriteLine($"[DEBUG_LOG] Output logprobs tensor shape: 1x{outFrames}x{vocabSize}");
-
-                // Print max logprob for first few frames for debugging
-                for (int t = 0; t < Math.Min(5, outFrames); t++)
-                {
-                    float maxVal = float.NegativeInfinity;
-                    int maxIdx = -1;
-                    for (int v = 0; v < vocabSize; v++)
-                    {
-                        float val = logprobsTensor[0, t, v];
-                        if (val > maxVal) { maxVal = val; maxIdx = v; }
-                    }
-                    string token = (maxIdx < tokens.Length) ? tokens[maxIdx] : "[BLANK]";
-                    Console.WriteLine($"[DEBUG_LOG]   Frame {t}: max logprob {maxVal:F4} for token '{token}'");
-                }
 
                 var output = new float[outFrames, vocabSize];
                 for (int t = 0; t < outFrames; t++)
@@ -296,6 +321,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 currentS = backtrack[t, currentS];
             }
 
+
             return path;
         }
 
@@ -324,7 +350,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
             }
 
             // 2. Calculate token-level timestamps
-            // Token i is at state 2*i + 1 in the augmented sequence
+            // Logic: Each token starts at its first appearance and lasts until the NEXT token starts.
+            // This ensures words are contiguous and include the following blanks.
             var tokenTimestamps = new List<TokenTimestamp>();
             for (int i = 0; i < targetIds.Count; i++)
             {
@@ -332,13 +359,34 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 int startFrame = firstAppearance[stateIdx];
                 int endFrame = lastAppearance[stateIdx];
 
-                // If a token was skipped in the path (should not happen in CTC forced alignment),
-                // we'll use the frame of the previous/next state.
                 if (startFrame == -1)
                 {
                     // Fallback: use the end of the previous state or start of the next
                     startFrame = (stateIdx > 0) ? lastAppearance[stateIdx - 1] + 1 : 0;
                     endFrame = startFrame;
+                }
+                else
+                {
+                    // Extend to next token
+                    int nextTokenStart = -1;
+                    for (int j = i + 1; j < targetIds.Count; j++)
+                    {
+                        int nextStateIdx = 2 * j + 1;
+                        if (firstAppearance[nextStateIdx] != -1)
+                        {
+                            nextTokenStart = firstAppearance[nextStateIdx];
+                            break;
+                        }
+                    }
+
+                    if (nextTokenStart != -1)
+                    {
+                        endFrame = nextTokenStart - 1;
+                    }
+                    else
+                    {
+                        endFrame = path.Length - 1;
+                    }
                 }
 
                 var tt = new TokenTimestamp
