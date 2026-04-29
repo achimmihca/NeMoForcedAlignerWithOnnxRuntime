@@ -103,8 +103,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             
             var alignment = new NemoForcedAligner.ForcedAlignmentResult
             {
-                Words = new List<NemoForcedAligner.WordTimestamp> { wt },
-                Tokens = new List<NemoForcedAligner.TokenTimestamp> { tt1, tt2 }
+                Words = new List<NemoForcedAligner.WordTimestamp> { wt }
             };
 
             var padder = new WordTimestampPadder(100, 100);

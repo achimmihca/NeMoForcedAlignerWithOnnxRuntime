@@ -126,37 +126,61 @@ namespace NemoForcedAlignerWithOnnxRuntime
         /// </summary>
         private AudioFeatures ExtractFeatures(AudioData audioData)
         {
+            float[] samples = PrepareSamples(audioData);
+
+            var options = CreateFilterbankOptions();
+            var extractor = new FilterbankExtractor(options);
+            var signal = new DiscreteSignal(SampleRate, samples);
+            var features = extractor.ComputeFrom(signal);
+
+            ApplyLog(features);
+            Normalize(features);
+
+            return new AudioFeatures { Data = features.ToArray() };
+        }
+
+        private float[] PrepareSamples(AudioData audioData)
+        {
             float[] samples = audioData.Samples;
-            if (audioData.SampleRate != SampleRate || audioData.ChannelCount != 1)
+
+            if (audioData.ChannelCount > 1)
             {
-                // Convert to mono if needed
-                if (audioData.ChannelCount > 1)
-                {
-                    float[] monoSamples = new float[audioData.Samples.Length / audioData.ChannelCount];
-                    for (int i = 0; i < monoSamples.Length; i++)
-                    {
-                        float sum = 0;
-                        for (int c = 0; c < audioData.ChannelCount; c++)
-                        {
-                            sum += audioData.Samples[i * audioData.ChannelCount + c];
-                        }
-
-                        monoSamples[i] = sum / audioData.ChannelCount;
-                    }
-
-                    samples = monoSamples;
-                }
-
-                // Resample if needed
-                if (audioData.SampleRate != SampleRate)
-                {
-                    var inputSignal = new DiscreteSignal(audioData.SampleRate, samples);
-                    var resampled = Operation.Resample(inputSignal, SampleRate);
-                    samples = resampled.Samples;
-                }
+                samples = ConvertToMono(samples, audioData.ChannelCount);
             }
 
-            var options = new FilterbankOptions
+            if (audioData.SampleRate != SampleRate)
+            {
+                samples = Resample(samples, audioData.SampleRate);
+            }
+
+            return samples;
+        }
+
+        private float[] ConvertToMono(float[] samples, int channelCount)
+        {
+            float[] monoSamples = new float[samples.Length / channelCount];
+            for (int i = 0; i < monoSamples.Length; i++)
+            {
+                float sum = 0;
+                for (int c = 0; c < channelCount; c++)
+                {
+                    sum += samples[i * channelCount + c];
+                }
+                monoSamples[i] = sum / channelCount;
+            }
+            return monoSamples;
+        }
+
+        private float[] Resample(float[] samples, int sourceSampleRate)
+        {
+            var inputSignal = new DiscreteSignal(sourceSampleRate, samples);
+            var resampled = Operation.Resample(inputSignal, SampleRate);
+            return resampled.Samples;
+        }
+
+        private FilterbankOptions CreateFilterbankOptions()
+        {
+            return new FilterbankOptions
             {
                 SamplingRate = SampleRate,
                 FrameSize = 400,
@@ -168,11 +192,10 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 FftSize = 512,
                 FilterBank = FilterBanks.Triangular(512, SampleRate, FilterBanks.MelBands(80, SampleRate, 0, 8000))
             };
+        }
 
-            var extractor = new FilterbankExtractor(options);
-            var signal = new DiscreteSignal(SampleRate, samples);
-            var features = extractor.ComputeFrom(signal);
-
+        private void ApplyLog(List<float[]> features)
+        {
             foreach (var frame in features)
             {
                 for (int i = 0; i < frame.Length; i++)
@@ -180,10 +203,15 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     frame[i] = (float)Math.Log(Math.Max(frame[i], 1e-5));
                 }
             }
+        }
 
-            // Normalization: per-feature (standardize each mel bin across time)
+        private void Normalize(List<float[]> features)
+        {
+            if (features.Count == 0) return;
+
             int numFrames = features.Count;
-            int numBins = options.FilterBankSize;
+            int numBins = features[0].Length;
+
             for (int b = 0; b < numBins; b++)
             {
                 double sum = 0;
@@ -203,8 +231,6 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     features[t][b] = (float)((features[t][b] - mean) / std);
                 }
             }
-
-            return new AudioFeatures { Data = features.ToArray() };
         }
 
         private LogProbs RunInference(AudioFeatures features)
@@ -326,15 +352,24 @@ namespace NemoForcedAlignerWithOnnxRuntime
 
         /// <summary>
         /// Converts the Viterbi path into word and token timestamps.
-        /// Logic is aligned with NeMo Forced Aligner's Python implementation.
         /// </summary>
         private ForcedAlignmentResult GetAlignment(int[] path, List<int> targetIds, double frameDuration, int S)
         {
-            var result = new ForcedAlignmentResult();
+            FindAppearances(path, S, out var firstAppearance, out var lastAppearance);
 
-            // 1. Find first and last appearance of each state in the path
-            int[] firstAppearance = new int[S];
-            int[] lastAppearance = new int[S];
+            var tokenTimestamps = GetTokenTimestamps(targetIds, frameDuration, firstAppearance, lastAppearance);
+            var wordTimestamps = AggregateWords(tokenTimestamps);
+
+            return new ForcedAlignmentResult
+            {
+                Words = wordTimestamps
+            };
+        }
+
+        private void FindAppearances(int[] path, int S, out int[] firstAppearance, out int[] lastAppearance)
+        {
+            firstAppearance = new int[S];
+            lastAppearance = new int[S];
             for (int s = 0; s < S; s++)
             {
                 firstAppearance[s] = -1;
@@ -347,10 +382,10 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 if (firstAppearance[s] == -1) firstAppearance[s] = t;
                 lastAppearance[s] = t;
             }
+        }
 
-            // 2. Calculate token-level timestamps
-            // Logic: Each token starts at its first appearance and ends at its last appearance.
-            // This ensures maximum precision and correctly identifies gaps (blanks) between tokens and words.
+        private List<TokenTimestamp> GetTokenTimestamps(List<int> targetIds, double frameDuration, int[] firstAppearance, int[] lastAppearance)
+        {
             var tokenTimestamps = new List<TokenTimestamp>();
             for (int i = 0; i < targetIds.Count; i++)
             {
@@ -365,16 +400,18 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     endFrame = startFrame;
                 }
 
-                var tt = new TokenTimestamp
+                tokenTimestamps.Add(new TokenTimestamp
                 {
                     Token = tokens[targetIds[i]],
                     StartTime = startFrame * frameDuration,
                     EndTime = (endFrame + 1) * frameDuration
-                };
-                tokenTimestamps.Add(tt);
+                });
             }
+            return tokenTimestamps;
+        }
 
-            // 3. Aggregate into words
+        private List<WordTimestamp> AggregateWords(List<TokenTimestamp> tokenTimestamps)
+        {
             var wordTimestamps = new List<WordTimestamp>();
             foreach (var tt in tokenTimestamps)
             {
@@ -382,7 +419,9 @@ namespace NemoForcedAlignerWithOnnxRuntime
                 {
                     var wt = new WordTimestamp
                     {
-                        Word = tt.Token.Substring(1), StartTime = tt.StartTime, EndTime = tt.EndTime
+                        Word = tt.Token.Substring(1),
+                        StartTime = tt.StartTime,
+                        EndTime = tt.EndTime
                     };
                     wt.Tokens.Add(tt);
                     wordTimestamps.Add(wt);
@@ -395,10 +434,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     lastWord.Tokens.Add(tt);
                 }
             }
-
-            result.Tokens = tokenTimestamps;
-            result.Words = wordTimestamps;
-            return result;
+            return wordTimestamps;
         }
 
         public class Configuration
@@ -418,7 +454,17 @@ namespace NemoForcedAlignerWithOnnxRuntime
         public class ForcedAlignmentResult
         {
             public List<WordTimestamp> Words { get; set; } = new List<WordTimestamp>();
-            public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
+
+            public ForcedAlignmentResult Clone()
+            {
+                var result = new ForcedAlignmentResult();
+                foreach (var w in Words)
+                {
+                    result.Words.Add(w.Clone());
+                }
+
+                return result;
+            }
         }
 
         public class TokenTimestamp
@@ -427,6 +473,11 @@ namespace NemoForcedAlignerWithOnnxRuntime
             public double StartTime { get; set; }
             public double EndTime { get; set; }
             public override string ToString() => $"'{Token}': {StartTime:F2} - {EndTime:F2}";
+
+            public TokenTimestamp Clone()
+            {
+                return new TokenTimestamp { Token = Token, StartTime = StartTime, EndTime = EndTime };
+            }
         }
 
         public class WordTimestamp
@@ -436,6 +487,17 @@ namespace NemoForcedAlignerWithOnnxRuntime
             public double EndTime { get; set; }
             public List<TokenTimestamp> Tokens { get; set; } = new List<TokenTimestamp>();
             public override string ToString() => $"{Word}: {StartTime:F2} - {EndTime:F2} ({Tokens.Count} tokens)";
+
+            public WordTimestamp Clone()
+            {
+                var clone = new WordTimestamp { Word = Word, StartTime = StartTime, EndTime = EndTime };
+                foreach (var t in Tokens)
+                {
+                    clone.Tokens.Add(t.Clone());
+                }
+
+                return clone;
+            }
         }
 
         public class AudioData
@@ -444,6 +506,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             public int ChannelCount { get; set; }
             public int SampleRate { get; set; }
         }
+
 
         private class LogProbs
         {
