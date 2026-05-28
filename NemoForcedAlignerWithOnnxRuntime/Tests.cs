@@ -113,7 +113,8 @@ namespace NemoForcedAlignerWithOnnxRuntime
         {
             double maxWordLengthForPaddingMs = 500;
             double paddingMs = 100;
-            double audioDurationMs = (double)audioData.Samples.Length / audioData.ChannelCount / audioData.SampleRate;
+            double audioDurationSec = (double)audioData.Samples.Length / audioData.ChannelCount / audioData.SampleRate;
+            double audioDurationMs = audioDurationSec * 1000.0;
             NemoForcedAligner.ForcedAlignmentResult paddedAlignment =
                 new WordTimestampPadder(paddingMs, paddingMs, maxWordLengthForPaddingMs, audioDurationMs).PadTimestamps(alignment);
             
