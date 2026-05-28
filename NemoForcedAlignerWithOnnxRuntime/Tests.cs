@@ -43,7 +43,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
             return currentDir ?? throw new Exception("Could not find project root");
         }
 
-        private static NemoForcedAligner.Configuration GetNemoForcedAlignerConfiguration(string projectRoot, string language)
+        private static NemoForcedAlignerConfiguration GetNemoForcedAlignerConfiguration(string projectRoot, string language)
         {
             var configs = new[]
             {
@@ -62,7 +62,7 @@ namespace NemoForcedAlignerWithOnnxRuntime
                    ?? throw new Exception($"No configuration found for language {language}");
         }
 
-        private static NemoForcedAligner.ForcedAlignmentResult RunAlignment(NemoForcedAligner.Configuration config, NemoForcedAligner.AudioData audioData, string transcript)
+        private static NemoForcedAligner.ForcedAlignmentResult RunAlignment(NemoForcedAlignerConfiguration config, NemoForcedAligner.AudioData audioData, string transcript)
         {
             using (var aligner = new NemoForcedAligner(config.ModelPath, config.TokensPath))
             {
@@ -148,6 +148,19 @@ namespace NemoForcedAlignerWithOnnxRuntime
                     string wordAudioPath = Path.Combine(audioOutputFolder, wordAudioFileName);
                     AudioSaver.SaveAudio(wordAudioPath, wordSamples, audioData.SampleRate, audioData.ChannelCount);
                 }
+            }
+        }
+        public class NemoForcedAlignerConfiguration
+        {
+            public string Language { get; set; }
+            public string ModelPath { get; set; }
+            public string TokensPath { get; set; }
+
+            public NemoForcedAlignerConfiguration(string language, string modelPath, string tokensPath)
+            {
+                Language = language;
+                ModelPath = modelPath;
+                TokensPath = tokensPath;
             }
         }
     }

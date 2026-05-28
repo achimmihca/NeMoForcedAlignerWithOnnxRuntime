@@ -437,20 +437,6 @@ namespace NemoForcedAlignerWithOnnxRuntime
             return wordTimestamps;
         }
 
-        public class Configuration
-        {
-            public string Language { get; set; }
-            public string ModelPath { get; set; }
-            public string TokensPath { get; set; }
-
-            public Configuration(string language, string modelPath, string tokensPath)
-            {
-                Language = language;
-                ModelPath = modelPath;
-                TokensPath = tokensPath;
-            }
-        }
-
         public class ForcedAlignmentResult
         {
             public List<WordTimestamp> Words { get; set; } = new List<WordTimestamp>();
