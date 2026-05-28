@@ -10,7 +10,7 @@ def export_model():
 
     model_name = args.model
     onnx_file = args.output if args.output else f"{model_name.replace('/', '_')}.onnx"
-    tokens_file = f"tokens_{model_name.replace('/', '_')}.txt"
+    tokens_file = os.path.splitext(onnx_file)[0] + ".txt"
 
     print(f"Loading pretrained model: {model_name}...")
     # Using ASRModel.from_pretrained to support various model types (CTC, Hybrid)

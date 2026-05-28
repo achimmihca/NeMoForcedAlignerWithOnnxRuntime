@@ -47,15 +47,15 @@ namespace NemoForcedAlignerWithOnnxRuntime
         {
             var configs = new[]
             {
-                new NemoForcedAligner.Configuration("en",
+                new NemoForcedAlignerConfiguration("en",
                     Path.Combine(projectRoot, "onnx_model_export", "stt_en_conformer_ctc_large.onnx"),
-                    Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_en_conformer_ctc_large.txt")),
-                new NemoForcedAligner.Configuration("de",
+                    Path.Combine(projectRoot, "onnx_model_export", "stt_en_conformer_ctc_large.txt")),
+                new NemoForcedAlignerConfiguration("de",
                     Path.Combine(projectRoot, "onnx_model_export", "stt_de_conformer_ctc_large.onnx"),
-                    Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_de_conformer_ctc_large.txt")),
-                new NemoForcedAligner.Configuration("es",
+                    Path.Combine(projectRoot, "onnx_model_export", "stt_de_conformer_ctc_large.txt")),
+                new NemoForcedAlignerConfiguration("es",
                     Path.Combine(projectRoot, "onnx_model_export", "stt_es_conformer_ctc_large.onnx"),
-                    Path.Combine(projectRoot, "onnx_model_export", "tokens_stt_es_conformer_ctc_large.txt"))
+                    Path.Combine(projectRoot, "onnx_model_export", "stt_es_conformer_ctc_large.txt"))
             };
 
             return configs.FirstOrDefault(c => c.Language == language)
